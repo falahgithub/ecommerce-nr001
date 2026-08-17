@@ -1,0 +1,68 @@
+name: NR-001 Authority Check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  detect-cross-schema-writes:
+    name: Detect Cross-Schema Write Violations
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Scan for NR-001 violations
+        run: |
+          echo "=== NR-001: Checking for cross-schema writes ==="
+          
+          # Define who owns what
+          # Format: "service_directory:schema_name"
+          declare -A OWNERS
+          OWNERS["order-service"]="orders"
+          OWNERS["inventory-service"]="inventory"
+          
+          VIOLATION_FOUND=0
+          
+          for service_dir in services/*/; do
+            SERVICE_NAME=$(basename "$service_dir")
+            OWNED_SCHEMA="${OWNERS[$SERVICE_NAME]}"
+            
+            if [ -z "$OWNED_SCHEMA" ]; then
+              echo "⚠️  No schema defined for $SERVICE_NAME, skipping..."
+              continue
+            fi
+            
+            echo "Checking $SERVICE_NAME (owns schema: $OWNED_SCHEMA)..."
+            
+            # Look for SQL files in this service that write to OTHER schemas
+            for other_schema in "${OWNERS[@]}"; do
+              if [ "$other_schema" != "$OWNED_SCHEMA" ]; then
+                # Search for INSERT/UPDATE/DELETE into other schema
+                # Pattern: schema_name.table_name
+                MATCHES=$(grep -rniE "(INSERT INTO|UPDATE|DELETE FROM)\s+${other_schema}\." "$service_dir" || true)
+                
+                if [ -n "$MATCHES" ]; then
+                  echo ""
+                  echo "❌ NR-001 VIOLATION DETECTED in $SERVICE_NAME"
+                  echo "   Service '$SERVICE_NAME' is trying to write to schema '$other_schema'"
+                  echo "   But '$other_schema' is owned by another service!"
+                  echo ""
+                  echo "   Offending lines:"
+                  echo "$MATCHES"
+                  echo ""
+                  VIOLATION_FOUND=1
+                fi
+              fi
+            done
+          done
+          
+          if [ "$VIOLATION_FOUND" -eq 1 ]; then
+            echo "❌ NR-001 CHECK FAILED"
+            exit 1
+          else
+            echo "✅ NR-001 CHECK PASSED - No cross-schema writes detected"
+          fi
