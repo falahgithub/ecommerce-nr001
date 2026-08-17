@@ -1,3 +1,6 @@
+# All files owned by technical lead
+* @falahgithub
+
 # Workflow files must be approved by the founder
 .github/workflows/  @falahgithub
 .github/actions/    @falahgithub
